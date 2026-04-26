@@ -1,0 +1,8 @@
+[package]
+name = "pool-spy"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "pool-spy"
+path = "src/main.rs"
