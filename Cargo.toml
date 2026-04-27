@@ -1,3 +1,4 @@
+cat > Cargo.toml << 'EOF'
 [package]
 name = "pool-spy"
 version = "0.1.0"
@@ -6,3 +7,10 @@ edition = "2021"
 [[bin]]
 name = "pool-spy"
 path = "src/main.rs"
+
+[dependencies]
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+EOF
