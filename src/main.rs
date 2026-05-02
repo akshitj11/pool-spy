@@ -2,7 +2,7 @@ use serde::Deserialize;
 use clap::{Parser, Subcommand};
 use tokio::time::{sleep, Duration};
 use std::io::{self,Write};
-
+use anyhow::Result;
 // ─── CLI STRUCTURE ───────────────────────────────────────────
 
 #[derive(Parser)]
@@ -148,7 +148,7 @@ fn format_number(n: f64) -> String {
     }
 }
 
-async fn fetch_pools(limit: u32) -> Vec<Pool> {
+async fn fetch_pools(limit: u32) -> Result<Vec<Pool>> {
     let query = format!(r#"
     {{
         topV3Pools(first: {}, chain: ETHEREUM) {{
@@ -174,27 +174,31 @@ async fn fetch_pools(limit: u32) -> Vec<Pool> {
         .header("Origin", "https://app.uniswap.org")
         .json(&serde_json::json!({ "query": query }))
         .send()
-        .await
-        .expect("Failed to send request");
+        .await?;
 
     let result: GraphQLData = response
         .json()
-        .await
-        .expect("Failed to parse response");
+        .await?;
 
-    result.data.top_v3_pools
+    Ok(result.data.top_v3_pools)
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Top { limit, sort, output } => {
             println!("\n pool-spy — Top {} Uniswap V3 Pools\n", limit);
-            let pools = fetch_pools(limit).await;
+            let pools = match fetch_pools(limit).await {
+                Ok(p) => p,
+                Err(e) => {
+                  println!("Failed to fetch pools: {}", e);
+                  return Ok(());
+    }
+};
 
             // Sort pools
             let mut pools = pools;
@@ -219,7 +223,7 @@ async fn main() {
                     println!("  }}{}", comma);
                 }
                 println!("]");
-                return;
+                return Ok(());
             }
 
             
@@ -268,12 +272,18 @@ async fn main() {
 
         Commands::Info { pair } => {
             println!("\n pool-spy — Looking up {}\n", pair);
-            let pools = fetch_pools(20).await;
+            let pools = match fetch_pools(20).await {
+               Ok(p) => p,
+               Err(e) => {
+                  println!(" Failed to fetch pools: {}", e);
+                  return Ok(());
+    }
+};
 
             let parts: Vec<&str> = pair.split('/').collect();
             if parts.len() != 2 {
                 println!("Invalid pair format. Use: USDC/WETH");
-                return;
+                return Ok(());
             }
 
             let token0 = parts[0].to_uppercase();
@@ -314,7 +324,14 @@ async fn main() {
 
             loop {
                 refresh_count += 1;
-                let pools = fetch_pools(20).await;
+                let pools = match fetch_pools(20).await {
+                   Ok(p) => p,
+                   Err(e) => {
+                       println!("❌ Network error: {}. Retrying in {}s...", e, interval);
+                       sleep(Duration::from_secs(interval)).await;
+                       continue;
+    }
+};
 
                 let found: Option<&Pool> = pools
                     .iter()
@@ -373,5 +390,6 @@ async fn main() {
             }
         }
     }
+Ok(())
 }
         
