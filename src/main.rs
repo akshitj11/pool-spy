@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use clap::{Parser, Subcommand};
 use tokio::time::{sleep, Duration};
+use std::io::{self,Write};
 
 // ─── CLI STRUCTURE ───────────────────────────────────────────
 
@@ -186,10 +187,47 @@ async fn main() {
         Commands::Top { limit } => {
             println!("\n pool-spy — Top {} Uniswap V3 Pools\n", limit);
             let pools = fetch_pools(limit).await;
-            for pool in &pools {
-                pool.display();
+
+            // Print numbered list
+            for (i, pool) in pools.iter().enumerate() {
+                let price = pool.current_price();
+                let change = pool.price_change_24h();
+                let arrow = if change >= 0.0 { "↑" } else { "↓" };
+                println!(
+                    "  [{}] {:<12} TVL: ${:<12} Price: ${:.2} {} {:.2}%",
+                    i + 1,
+                    pool.pair_name(),
+                    format_number(pool.total_liquidity.value),
+                    price,
+                    arrow,
+                    change.abs()
+                );
             }
-            println!("\n {} pools fetched live from Uniswap V3\n", pools.len());
+
+            // Ask user to pick a pool
+            loop {
+                print!("\nEnter pool number for details (or q to quit): ");
+                io::stdout().flush().unwrap();
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input).unwrap();
+                let input = input.trim();
+
+                if input == "q" || input == "Q" {
+                    println!("Bye!");
+                    break;
+                }
+
+                match input.parse::<usize>() {
+                    Ok(n) if n >= 1 && n <= pools.len() => {
+                        println!();
+                        pools[n - 1].display();
+                    }
+                    _ => {
+                        println!(" Invalid input. Enter a number between 1 and {}", pools.len());
+                    }
+                }
+            }
         }
 
         Commands::Info { pair } => {
