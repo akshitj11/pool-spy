@@ -20,6 +20,12 @@ enum Commands {
         /// Number of pools to show (default: 5)
         #[arg(short, long, default_value_t = 5)]
         limit: u32,
+        /// Sort by: tvl, txns (default: tvl)
+        #[arg(short, long, default_value = "tvl")]
+        sort: String,
+        /// Output format: table, json (default: table)
+        #[arg(short, long, default_value = "table")]
+        output: String,
     },
     /// Show details for a specific pool pair
     Info {
@@ -31,6 +37,8 @@ enum Commands {
         pair: String,
         #[arg(short,long,default_value_t=30)]
         interval: u64,
+        #[arg(short, long)]
+        alert_price: Option<f64>,
     },
 }
 
@@ -184,9 +192,37 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Top { limit } => {
+        Commands::Top { limit, sort, output } => {
             println!("\n pool-spy — Top {} Uniswap V3 Pools\n", limit);
             let pools = fetch_pools(limit).await;
+
+            // Sort pools
+            let mut pools = pools;
+            match sort.as_str() {
+                "txns" => pools.sort_by(|a, b| b.tx_count.cmp(&a.tx_count)),
+                _ => pools.sort_by(|a, b| b.total_liquidity.value
+                    .partial_cmp(&a.total_liquidity.value)
+                    .unwrap()),
+            }
+
+            // Handle output format
+            if output == "json" {
+                println!("[");
+                for (i, pool) in pools.iter().enumerate() {
+                    let comma = if i < pools.len() - 1 { "," } else { "" };
+                    println!("  {{");
+                    println!("    \"pair\": \"{}\",", pool.pair_name());
+                    println!("    \"price\": {:.2},", pool.current_price());
+                    println!("    \"tvl\": {:.0},", pool.total_liquidity.value);
+                    println!("    \"feeTier\": \"{}\",", pool.fee_percent());
+                    println!("    \"txCount\": {}", pool.tx_count);
+                    println!("  }}{}", comma);
+                }
+                println!("]");
+                return;
+            }
+
+            
 
             // Print numbered list
             for (i, pool) in pools.iter().enumerate() {
@@ -260,7 +296,7 @@ async fn main() {
             }
         }
 
-        Commands::Watch {pair,interval} => {
+        Commands::Watch {pair,interval,alert_price} => {
             let parts: Vec<&str>=pair.split('/').collect();
             if parts.len() !=2{
                 println!("invalid pair formate. use:USDC/WETH");
@@ -300,10 +336,23 @@ async fn main() {
                             Some(prev) => {
                                 let change = ((price - prev) / prev) * 100.0;
                                 let arrow = if change >= 0.0 { "↑" } else { "↓" };
+
+                                // Check alert threshold
+                                if let Some(threshold) = alert_price {
+                                    if change.abs() >= threshold {
+                                        println!("\x1B[31m"); // red color
+                                        println!("🚨 ALERT! {}/{} moved {:.3}% — threshold was {}%",
+                                            token0, token1, change.abs(), threshold);
+                                        println!("   Price: ${:.2} → ${:.2}", prev, price);
+                                        println!("\x1B[0m"); // reset color
+                                    }
+                                }
+
                                 format!("{} {:.3}% since last refresh", arrow, change.abs())
                             }
                             None => String::from("first reading"),
                         };
+                        
 
                         // Clear screen and reprint
                         print!("\x1B[2J\x1B[1;1H");
