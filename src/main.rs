@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use clap::{Parser, Subcommand};
+use tokio::time::{sleep, Duration};
 
 // ─── CLI STRUCTURE ───────────────────────────────────────────
 
@@ -23,6 +24,12 @@ enum Commands {
     Info {
         /// Token pair e.g. USDC/WETH
         pair: String,
+    },
+    /// refreshing the pool evey N seconds , so it is updated regurlarly
+    Watch{
+        pair: String,
+        #[arg(short,long,default_value_t=30)]
+        interval: u64,
     },
 }
 
@@ -214,5 +221,70 @@ async fn main() {
                 }
             }
         }
+
+        Commands::Watch {pair,interval} => {
+            let parts: Vec<&str>=pair.split('/').collect();
+            if parts.len() !=2{
+                println!("invalid pair formate. use:USDC/WETH");
+            }
+
+            let token0=parts[0].to_uppercase();
+            let token1=parts[1].to_uppercase();
+
+            println!("\n👁  Watching {}/{} — refreshing every {}s", token0, token1, interval);
+            println!("Press Ctrl+C to stop\n");
+            
+
+            let mut last_price: Option<f64> = None;
+            let mut refresh_count = 0;
+
+            loop {
+                refresh_count += 1;
+                let pools = fetch_pools(20).await;
+
+                let found: Option<&Pool> = pools
+                    .iter()
+                    .find(|p| {
+                        (p.token0.symbol == token0 && p.token1.symbol == token1)
+                        || (p.token0.symbol == token1 && p.token1.symbol == token0)
+                    });
+
+                match found {
+                    None => {
+                        println!("Pool not found for {}/{}", token0, token1);
+                        break;
+                    }
+                    Some(pool) => {
+                        let price = pool.current_price();
+
+                        // Calculate change since last refresh
+                        let change_since_last = match last_price {
+                            Some(prev) => {
+                                let change = ((price - prev) / prev) * 100.0;
+                                let arrow = if change >= 0.0 { "↑" } else { "↓" };
+                                format!("{} {:.3}% since last refresh", arrow, change.abs())
+                            }
+                            None => String::from("first reading"),
+                        };
+
+                        // Clear screen and reprint
+                        print!("\x1B[2J\x1B[1;1H");
+
+                        println!("👁  pool-spy watch — {}/{}", token0, token1);
+                        println!("Refresh #{} | every {}s | Ctrl+C to stop\n", refresh_count, interval);
+
+                        pool.display();
+
+                        println!("\n   {}", change_since_last);
+                        println!("   Next refresh in {}s...", interval);
+
+                        last_price = Some(price);
+                    }
+                }
+
+                sleep(Duration::from_secs(interval)).await;
+            }
+        }
     }
 }
+        
